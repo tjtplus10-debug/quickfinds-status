@@ -1,0 +1,58 @@
+# Every 10 minutes (GitHub runs schedules when it can: in practice 10-60 min apart) and on demand.
+# A failure opens ONE issue titled "QuickFinds alert" (GitHub emails the repo owner), adds a
+# reminder comment at most every 3 hours while it lasts, and closes it when everything passes.
+name: check
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      fresh:
+        description: 'Also run a never-seen search (costs a few Serper calls)'
+        type: boolean
+        default: false
+  repository_dispatch:
+    types: [maya-deployed]
+concurrency:
+  group: check
+  cancel-in-progress: false
+permissions:
+  issues: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check what shoppers see
+        env:
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: node check.mjs ${{ (github.event_name == 'repository_dispatch' || inputs.fresh) && '--fresh' || '' }}
+      - name: Open, update or close the alert
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const res = JSON.parse(fs.readFileSync('results.json', 'utf8'));
+            const title = 'QuickFinds alert';
+            const { data: open } = await github.rest.issues.listForRepo({ ...context.repo, state: 'open', labels: 'alert' });
+            const issue = open.find(i => i.title === title);
+            const trigger = context.eventName === 'repository_dispatch' ? 'after a search server deploy' : 'scheduled check';
+            const lines = res.failures.map(f => `- **${f.name}**: ${f.detail}`).join('\n');
+            if (!res.ok) {
+              if (!issue) {
+                await github.rest.issues.create({ ...context.repo, title, labels: ['alert'], body: `Something shoppers see is broken (${trigger}, ${res.at}):\n\n${lines}\n\nThis issue closes by itself when every check passes again.` });
+              } else {
+                const { data: comments } = await github.rest.issues.listComments({ ...context.repo, issue_number: issue.number, per_page: 100 });
+                const last = comments.length ? Date.parse(comments[comments.length - 1].created_at) : Date.parse(issue.created_at);
+                if (Date.now() - last > 3 * 3600e3 || context.eventName !== 'schedule') {
+                  await github.rest.issues.createComment({ ...context.repo, issue_number: issue.number, body: `Still broken (${trigger}, ${res.at}):\n\n${lines}` });
+                }
+              }
+            } else if (issue) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: issue.number, body: `All checks pass again (${res.at}). Closing.` });
+              await github.rest.issues.update({ ...context.repo, issue_number: issue.number, state: 'closed' });
+            }
