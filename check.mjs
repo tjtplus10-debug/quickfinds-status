@@ -91,6 +91,20 @@ check('Cash back rates are current', async () => {
   return `updated ${ago(t)}`;
 });
 
+// A real sign-up, every run (2026-10-08: every sign-up failed for ~18h because a bonus trigger
+// threw, and nobody knew). The signup-canary function creates a throwaway account the way the app
+// does, checks its profile and $10 bonus, and deletes it. Never skipped: not configured = alert.
+check('Sign-up works (account, profile, $10 bonus)', async () => {
+  const secret = process.env.SIGNUP_CANARY_SECRET;
+  if (!secret) throw new Error('sign-up check not configured (SIGNUP_CANARY_SECRET missing)');
+  const t = Date.now();
+  const r = await fetch(`${SUPA}/functions/v1/signup-canary`, { method: 'POST', headers: { 'x-canary-secret': secret }, signal: AbortSignal.timeout(30000) });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 404) throw new Error('signup-canary function is not deployed');
+  if (!r.ok || !j.ok) throw new Error(`SIGN-UPS ARE BROKEN: ${j.step ?? 'sign-up'}: ${j.error ?? `HTTP ${r.status}`}`);
+  return `test account created and removed in ${Date.now() - t}ms`;
+});
+
 check('Website loads', async () => {
   const { r, ms } = await get(SITE, 20000);
   const body = await r.text();

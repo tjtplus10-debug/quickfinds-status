@@ -30,6 +30,7 @@ jobs:
       - name: Check what shoppers see
         env:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SIGNUP_CANARY_SECRET: ${{ secrets.SIGNUP_CANARY_SECRET }}
         run: node check.mjs ${{ (github.event_name == 'repository_dispatch' || inputs.fresh) && '--fresh' || '' }}
       - name: Open, update or close the alert
         uses: actions/github-script@v7
