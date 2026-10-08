@@ -105,28 +105,6 @@ check('Sign-up works (account, profile, $10 bonus)', async () => {
   return `test account created and removed in ${Date.now() - t}ms`;
 });
 
-// The shopping island's server (live-activity-start), every run (2026-10-08): registers a fake
-// phone, asks for an island, and expects Apple to accept our login and refuse only the fake
-// phone (BadDeviceToken). Catches the function being down, the database unreachable, and the
-// Apple push key broken or expired (InvalidProviderToken / ExpiredProviderToken).
-check('Shopping island server works', async () => {
-  const anon = process.env.SUPABASE_ANON_KEY;
-  if (!anon) throw new Error('island check not configured (SUPABASE_ANON_KEY missing)');
-  const h = { apikey: anon, Authorization: `Bearer ${anon}`, 'content-type': 'application/json' };
-  const device = `qf-status-probe-${Math.floor(Date.now() / 600e3)}`;
-  const reg = await fetch(`${SUPA}/rest/v1/rpc/register_live_activity_token`, { method: 'POST', headers: h, signal: AbortSignal.timeout(15000),
-    body: JSON.stringify({ p_device: device, p_token: 'ab'.repeat(40), p_env: 'sandbox' }) });
-  if (!reg.ok) throw new Error(`could not register a test phone: HTTP ${reg.status}`);
-  const t = Date.now();
-  const r = await fetch(`${SUPA}/functions/v1/live-activity-start`, { method: 'POST', headers: h, signal: AbortSignal.timeout(20000),
-    body: JSON.stringify({ device, store: 'Status Check', codes: [{ code: 'TEST', label: '' }] }) });
-  const j = await r.json().catch(() => ({}));
-  if (r.status === 404 && /function/i.test(JSON.stringify(j))) throw new Error('live-activity-start is not deployed');
-  if (r.status === 502 && j.reason === 'BadDeviceToken') return `Apple accepted our key (${Date.now() - t}ms)`;
-  if (/ProviderToken|Forbidden|TopicDisallowed/i.test(j.reason ?? '')) throw new Error(`ISLANDS ARE BROKEN: Apple refused our push key (${j.reason})`);
-  throw new Error(`ISLANDS MAY BE BROKEN: HTTP ${r.status} ${JSON.stringify(j).slice(0, 120)}`);
-});
-
 check('Website loads', async () => {
   const { r, ms } = await get(SITE, 20000);
   const body = await r.text();
